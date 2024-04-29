@@ -152,12 +152,18 @@ def insert_jira_worklog(issue, start_time, duration, work_description, jira_re_p
         return None
 
 
-def tag_timeentry_as_processed(time_entry_id, time_entry_description, toggl):
+def tag_timeentry_as_processed(tags, time_entry_id, time_entry_description, toggl):
     global _logger
+
+    if (tags is None):
+        newTags = ["jiraprocessed"]
+    else:
+        newTags = tags + ["jiraprocessed"]
+
     # JSON snipppet for tagging time tracking entries which have been added successfully to JIRA
     payload_for_toggl_tag = {
         "time_entry": {
-            "tags": ["jiraprocessed"]
+            "tags": newTags
         }
     }
     tagging_response = toggl.put(
@@ -171,12 +177,18 @@ def tag_timeentry_as_processed(time_entry_id, time_entry_description, toggl):
     return False
 
 
-def tag_timeentry_as_error(time_entry_id, time_entry_description, toggl):
+def tag_timeentry_as_error(tags, time_entry_id, time_entry_description, toggl):
     global _logger
+
+    if (tags is None):
+        newTags = ["jiraerror"]
+    else:
+        newTags = tags + ["jiraerror"]
+
     # JSON snippet for marking a time tracking entry using a non-existing or archived project
     payload_for_toggl_error_tag = {
         "time_entry": {
-            "tags": ["jiraerror"]
+            "tags": newTags
         }
     }
     tagging_response = toggl.put(
@@ -189,9 +201,9 @@ def tag_timeentry_as_error(time_entry_id, time_entry_description, toggl):
     return False
 
 
-def tag_grouped_timeentry_as_error(time_entries, toggl):
+def tag_grouped_timeentry_as_error(tags, time_entries, toggl):
     for time_entry in time_entries:
-        tag_timeentry_as_error(time_entry['id'], time_entry['description'], toggl)
+        tag_timeentry_as_error(tags, time_entry['id'], time_entry['description'], toggl)
 
 
 def main():
@@ -252,7 +264,8 @@ def main():
                 grouped_time_entries[group_key] = {
                     "pid": pid,
                     "description": description,
-                    "time_entries": []
+                    "time_entries": [],
+                    "tags": tags
                 }
             error_flag = False
             if (time_entry.get('id') is None):
@@ -262,19 +275,19 @@ def main():
                         time_entry['description']))
             if (not error_flag and start_time is None):
                 error_flag = True
-                tag_timeentry_as_error(time_entry['id'], '(missing start time)', toggl)
+                tag_timeentry_as_error(tags, time_entry['id'], '(missing start time)', toggl)
                 _logger.warning(
                     'The time entry with the id "{0}" and the description "{1}" has has no start time and cannot be transmitted to JIRA'.format(
                         str(time_entry['id']), time_entry['description']))
             if (not error_flag and time_entry.get('duration') is None):
                 error_flag = True
-                tag_timeentry_as_error(time_entry['id'], '(missing duration)', toggl)
+                tag_timeentry_as_error(tags, time_entry['id'], '(missing duration)', toggl)
                 _logger.warning(
                     'The time entry with the id "{0}" and the description "{1}" has has no time entry and cannot be transmitted to JIRA'.format(
                         str(time_entry['id']), time_entry['description']))
             if (not error_flag and time_entry.get('description') is None):
                 error_flag = True
-                tag_timeentry_as_error(time_entry['id'], '(missing description)', toggl)
+                tag_timeentry_as_error(tags, time_entry['id'], '(missing description)', toggl)
                 _logger.warning(
                     'The time entry with the id "{0}" has has no description and cannot be transmitted to JIRA'.format(
                         str(time_entry['id'])))
@@ -294,6 +307,7 @@ def main():
                     str(time_entry['id']), time_entry['description']))
 
     for key, grouped_time_entry in grouped_time_entries.items():
+        tags = grouped_time_entry["tags"]
         if (len(grouped_time_entry["time_entries"]) > 0):
             start_time = min(time_entry["start_time"] for time_entry in grouped_time_entry["time_entries"])
 
@@ -314,13 +328,13 @@ def main():
                     issue = jira.issue(issue_number)
                 except JIRAError:
                     _logger.error("The issue {0} could not be found in JIRA.".format(str(issue_number)))
-                    tag_grouped_timeentry_as_error(grouped_time_entry["time_entries"], toggl)
+                    tag_grouped_timeentry_as_error(tags, grouped_time_entry["time_entries"], toggl)
                     continue
             elif (grouped_time_entry["pid"] is not None) and (all_toggl_projects.get(grouped_time_entry["pid"]) is None):
                 _logger.error(
                     "The project with the id {0} is not in the list of active projects.".format(
                         str(grouped_time_entry["pid"])))
-                tag_grouped_timeentry_as_error(grouped_time_entry["time_entries"], toggl)
+                tag_grouped_timeentry_as_error(tags, grouped_time_entry["time_entries"], toggl)
                 continue
             else:
                 _logger.error("No JIRA issue number could be extracted from time entry project or work description. "
@@ -341,14 +355,14 @@ def main():
                             "A worklog for the time entry with the id \"{0}\" and the description \"{1}\" has been "
                             "created successfully".format(
                                 str(timeEntry['id']), timeEntry['description']))
-                        tag_timeentry_as_processed(timeEntry['id'], timeEntry['description'], toggl)
+                        tag_timeentry_as_processed(tags, timeEntry['id'], timeEntry['description'], toggl)
                 else:
                     _logger.error('No JIRA worklog could be created.')
-                    tag_grouped_timeentry_as_error(grouped_time_entry["time_entries"], toggl)
+                    tag_grouped_timeentry_as_error(tags, grouped_time_entry["time_entries"], toggl)
                     continue
             else:
                 _logger.error('No JIRA issue could be created with the given information.')
-                tag_grouped_timeentry_as_error(grouped_time_entry["time_entries"], toggl)
+                tag_grouped_timeentry_as_error(tags, grouped_time_entry["time_entries"], toggl)
                 continue
         else:
             grouped_time_entry["time_entries"]
